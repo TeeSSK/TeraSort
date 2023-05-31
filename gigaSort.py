@@ -1,122 +1,126 @@
-import queue
 import numpy as np
 import threading
-from concurrent.futures import ThreadPoolExecutor
 import time
-import numexpr as ne
+import sys
+import multiprocessing
+
+result = []
 
 
-def mergesort(arr):
-    if len(arr) <= 1:
-        return arr
-
-    mid = len(arr) // 2
-    left = mergesort(arr[:mid])
-    right = mergesort(arr[mid:])
-
-    result = []
-    i, j = 0, 0
-    while i < len(left) and j < len(right):
-        if left[i] <= right[j]:
-            result.append(left[i])
-            i += 1
-        else:
-            result.append(right[j])
-            j += 1
-
-    result += left[i:]
-    result += right[j:]
-    return result
+def selectSamples(A, k, p):
+    samples = np.random.choice(A, size=p*k, replace=True)
+    samples.sort()
+    splitters = np.empty(p+1)
+    splitters[0] = -np.inf
+    splitters[p] = np.inf
+    for i in range(1, p):
+        splitters[i] = samples[i*k]
+    # print(splitters, len(splitters))
+    return splitters
 
 
-def merge_sorted_chunks(sorted_chunks):
-    # Create a priority queue to store the next element from each sorted chunk
-    pq = queue.PriorityQueue()
-    for i, chunk in enumerate(sorted_chunks):
-        if len(chunk) > 0:
-            pq.put((chunk[0], i, 0))
-
-    # Merge the chunks using a priority queue-based algorithm
-    result = []
-    while not pq.empty():
-        val, array_idx, element_idx = pq.get()
-        result.append(val)
-        if element_idx + 1 < len(sorted_chunks[array_idx]):
-            pq.put((sorted_chunks[array_idx]
-                   [element_idx+1], array_idx, element_idx+1))
-
-    return result
+def placeInBuckets(A, splitters):
+    buckets = [[] for _ in range(len(splitters)-1)]
+    for a in A:
+        j = np.searchsorted(splitters, a, side='right') - 1
+        if j < len(buckets):
+            buckets[j].append(a)
+    # print("bucket", buckets)
+    return buckets
 
 
-def sort_chunk(arr):
-    # Sort a chunk of the input array
-    return np.sort(arr)
+def sampleSortThread(bucket, i):
+    print(i)
+    chunk = np.sort(bucket, kind='mergesort')
+    result.extend(chunk)
 
 
-def sort_and_merge_chunks(input_data, num_threads=4, k=4):
-    # Split the input data into chunks for multi-threading
-    chunk_size = len(input_data) // num_threads
-    chunks = [input_data[i:i+chunk_size]
-              for i in range(0, len(input_data), chunk_size)]
+def sampleSort(A, k=10, p=8):
+    A = np.array(A)
+    splitters = selectSamples(A, k, p)
+    buckets = placeInBuckets(A, splitters)
 
-    # Sort each chunk in parallel using separate threads
-    sorted_chunks = []
     threads = []
-    for chunk in chunks:
-        t = threading.Thread(target=lambda c: sorted_chunks.append(
-            sort_chunk(c)), args=(chunk,))
-        threads.append(t)
-        t.start()
+    for i in range(len(buckets)):
+        thread = threading.Thread(
+            target=sampleSortThread, args=(buckets[i], i))
+        threads.append(thread)
+        thread.start()
 
-    for t in threads:
-        t.join()
-
-    # Merge the sorted chunks using a k-way merge algorithm
-    while len(sorted_chunks) > k:
-        new_sorted_chunks = []
-        for i in range(0, len(sorted_chunks), k):
-            chunk = sorted_chunks[i:i+k]
-            new_sorted_chunks.append(merge_sorted_chunks(chunk))
-        sorted_chunks = new_sorted_chunks
-
-    sorted_data = merge_sorted_chunks(sorted_chunks)
-    return sorted_data
+    # Wait for all threads to finish
+    for thread in threads:
+        thread.join()
 
 
 def main():
-    arr = []
-    f = open("sort-rand-199999999.txt", "r")
-    # lines = f.readlines()
+    if len(sys.argv) != 3:
+        print("Usage: python3 GigaSort.py <inputPath> <outputPath>")
+        return
+
+    path_in = sys.argv[1]
+    path_out = sys.argv[2]
+
+    start_time_avx = time.time()
+    values = []
+    keys = []
+    # path_in = 'data/input/sort-rand-199999999.txt'
+    # lines = read_file_parallel('data/input/sort-rand-199999999.txt')
+    f = open(path_in, "r")
     count = 0
     for line in f:
-        if count == 10000000:
-            break
+        # if count == 2000:
+        #     break
         line = line.replace("\n", "")
-        num = float(line.split(" ")[1])
+        a, b = line.split(" ")
+        keys.append(a)
+        values.append(float(b))
         # print(num)
-        arr.append(num)
-        # print(line)
         count += 1
+    # print(arr)
     # for i in range(count):
     #     num = float(f.readline().replace("\n", "").split(" ")[1])
     #     arr.append(num)
 
     # Time the NumPy sort function
-    start_time_np = time.time()
-    sorted_arr_np = np.sort(arr, kind='mergesort')
-    end_time_np = time.time()
-    print("NumPy sort time:", end_time_np - start_time_np)
+    # start_time_np = time.time()
+    # sorted_arr_np = sampleSort(arr)
+    # end_time_np = time.time()
+    # print("test sort time:", end_time_np - start_time_np)
+    # print(result)
 
     # Time the AVX sort function
-    start_time_avx = time.time()
-    # sorted_arr_avx = np.sort(arr, kind='mergesort')
-    sorted_arr_avx = sort_and_merge_chunks(arr)
-    end_time_avx = time.time()
-    print("test sort time:", end_time_avx - start_time_avx)
+    # start_time_avx = time.time()
+    # sorted_arr_avx = np.sort(arr)
+    # print(sorted_arr_avx)
+    arr = np.array(values)
+    # key = np.array(keys)
+    indices_arr = np.argsort(arr, kind='mergesort')
+    # keyout = key[indices_arr]
+    # valout = arr[indices_arr]
+    # print(key[indices_arr])
+    # print(arr[indices_arr])
+    # sorted_arr_avx = sort_and_merge_chunks(arr)
+    # end_time_avx = time.time()
+    # print("numpy sort time:", end_time_avx - start_time_avx)
 
     # Verify that the two arrays are the same
     # assert np.allclose(sorted_arr_np, sorted_arr_avx)
 
+    # path_out = 'data/output/output.txt'
+    file_output = open(path_out, "w")
+    for i in range(count):
+        file_output.write(keys[indices_arr[i]]+' ' +
+                          str(arr[indices_arr[i]])+'\n')
+    file_output.close()
+
+    end_time_avx = time.time()
+    print("usage time:", end_time_avx - start_time_avx)
+
 
 if __name__ == '__main__':
     main()
+
+# python gigaSort.py data/input/sort-rand-199999999.txt data/output/output.txt
+# docker run -v "$(pwd)"/data/input:/input -v "$(pwd)"/data/output:/output gigasort /input/sort-rand-199999999.txt /output/output.txt
+
+# time docker run -v "$(pwd)"/data/input:/input -v "$(pwd)"/data/output:/output watcharavit/high-performance-arch:gigasort ./prog /input/sort-rand-199999999.txt /output/output.txt
