@@ -6,10 +6,10 @@ Term-project for education, aim to solve the problem GigaSort.
 Before start running project, you should create folder like this:  
 ```
 - data
-  input
-    your input file
-   output
-    your file for store output
+  - input
+      your input file
+  - output
+      your file for store output
 ```
 
 ## Run project via Python locally
